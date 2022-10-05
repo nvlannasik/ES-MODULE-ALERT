@@ -57,7 +57,7 @@ async function run() {
     size: count.count,
     sort: [
       {
-        Timestamp: {
+        timestamp: {
           order: "desc",
         },
       },
