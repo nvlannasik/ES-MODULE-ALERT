@@ -40,7 +40,6 @@ async function run() {
       query: {
         match: {
           rulesFlag: 0,
-          match_all: {},
         },
       },
     },
