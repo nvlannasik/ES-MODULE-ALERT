@@ -1,5 +1,5 @@
 require("dotenv").config();
-const cron = require("node-cron");
+const cron = require("cron").CronJob;
 const TelegramBot = require("node-telegram-bot-api");
 const { Client } = require("@elastic/elasticsearch");
 
@@ -26,62 +26,125 @@ const chatId = process.env.TELEGRAM_CHAT_ID;
 /// CRON JOB SETIAP 1 MENIT
 ///=================
 
-const task = cron.schedule("* * * * *", () => {
+const task = new cron(" * * * * *", function () {
   run().catch(console.log);
 });
 
-var itung = 0;
 ///==================
 /// ELASTICSEARCH COUNTING JUMLAH DATA DI INDEX
 ///==================
 async function run() {
-  const count = await client.count({
+  const countAlertFlag = await client.count({
     index: process.env.ELASTIC_INDEX,
     body: {
       query: {
-        match_all: {},
-      },
-    },
-  });
-
-  ///==================
-  /// ELASTICSEARCH CARI DATA TERBARU DAN KIRIM KE TELEGRAM
-  ///==================
-  const getQuery = await client.search({
-    index: process.env.ELASTIC_INDEX,
-    body: {
-      query: {
-        match_all: {},
-      },
-    },
-    size: count.count,
-    sort: [
-      {
-        Timestamp: {
-          order: "desc",
+        match: {
+          rulesFlag: 0,
         },
       },
-    ],
+    },
   });
 
-  if (itung != count.count || itung > count.count) {
-    bot.sendMessage(
-      chatId,
-      `[${getQuery.hits.hits.map((item) => item._source.Condition)[0]}] ${
-        getQuery.hits.hits.map((item) => item._source.Reason)[0]
-      }`
-    );
-    console.log("Ada data baru dan kirim pesan");
-  } else {
-    console.log("Ga ada Update yang harus dikirim");
-  }
-  itung = count.count;
+  const countRecoverFlag = await client.count({
+    index: process.env.ELASTIC_INDEX,
+    body: {
+      query: {
+        match: {
+          rulesFlag: 1,
+        },
+      },
+    },
+  });
 
+  const checkFlagAlert = await client.search({
+    index: process.env.ELASTIC_INDEX,
+    body: {
+      query: {
+        match: {
+          rulesFlag: 0,
+        },
+      },
+    },
+  });
+
+  const checkFlagRecovers = await client.search({
+    index: process.env.ELASTIC_INDEX,
+    body: {
+      query: {
+        match: {
+          rulesFlag: 1,
+        },
+      },
+    },
+  });
+
+  if (
+    checkFlagAlert.hits.hits.map((x) => x._source.rulesFlag).includes(0) == true
+  ) {
+    console.log("Ada Alert jumlahnya " + countAlertFlag.count + "");
+    for (let i = 0; i < countAlertFlag.count; i++) {
+      bot.sendMessage(
+        chatId,
+        `[Alert] ${checkFlagAlert.hits.hits.map((x) => x._source.reason)[i]} `
+      );
+      //update flag
+      await client.updateByQuery({
+        index: process.env.ELASTIC_INDEX,
+        body: {
+          script: {
+            source: "ctx._source.rulesFlag = 3",
+            params: {
+              rulesFlag: 3,
+            },
+          },
+          query: {
+            match: {
+              rulesFlag: 0,
+            },
+          },
+          conflicts: "proceed",
+        },
+      });
+    }
+  } else if (
+    checkFlagRecovers.hits.hits.map((x) => x._source.rulesFlag).includes(1) ==
+    true
+  ) {
+    console.log("Ada Recover jumlahnya " + countRecoverFlag.count + "");
+    for (let i = 0; i < countRecoverFlag.count; i++) {
+      bot.sendMessage(
+        chatId,
+        `[Recover] ${
+          checkFlagRecovers.hits.hits.map((x) => x._source.Alert_ID)[i]
+        }`
+      );
+
+      //update flag
+      await client.updateByQuery({
+        index: process.env.ELASTIC_INDEX,
+        body: {
+          script: {
+            source: "ctx._source.rulesFlag = 3",
+            params: {
+              rulesFlag: 3,
+            },
+          },
+          query: {
+            match: {
+              rulesFlag: 1,
+            },
+          },
+          conflicts: "proceed",
+        },
+      });
+    }
+  } else {
+    console.log("Tidak ada Alert dan Recover");
+  }
   //=============
   //BUAT DEBUG
   //=============
-  // const lastItem = getQuery.hits.hits
-  //   .map((item) => item._source.value)[0];
+  // const lastItem = checkFlagAlert.hits.hits._source;
 
   // console.log(lastItem);
 }
