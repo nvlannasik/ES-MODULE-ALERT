@@ -40,11 +40,11 @@ async function run() {
       query: {
         match: {
           rulesFlag: 0,
+          match_all: {},
         },
       },
     },
   });
-
   const countRecoverFlag = await client.count({
     index: process.env.ELASTIC_INDEX,
     body: {
